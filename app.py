@@ -17,16 +17,52 @@ import streamlit as st
 import tensorflow as tf
 
 # -------------------------------------------------------------------------
-# 1. Page Configuration
+# 1. Page Configuration & Minimalist Crisp Styling
 # -------------------------------------------------------------------------
 st.set_page_config(
-    page_title="DL-003: Real-Time CNN Cat vs. Dog Classifier",
+    page_title="DL-003 | Cat & Dog Image Classifier",
     page_icon="🐾",
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2.5rem;
+            max-width: 1180px;
+        }
+        .project-meta {
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            opacity: 0.72;
+            margin-bottom: 0.2rem;
+        }
+        .main-title {
+            font-size: 1.95rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+            line-height: 1.2;
+        }
+        .sub-caption {
+            font-size: 0.95rem;
+            opacity: 0.78;
+            margin-bottom: 1.25rem;
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: 1.35rem;
+            font-weight: 600;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 APP_DIR = Path(__file__).resolve().parent
-CLASS_NAMES = ["cats (Class 0: Cat 🐱)", "dogs (Class 1: Dog 🐶)"]
+CLASS_NAMES = ["Cat (Class 0)", "Dog (Class 1)"]
 CANDIDATE_MODEL_PATHS = [
     APP_DIR / "cat_dog_classifier.keras",
     Path("cat_dog_classifier.keras"),
@@ -34,11 +70,8 @@ CANDIDATE_MODEL_PATHS = [
 ]
 
 # ImageNet-1000 class index ranges for strict Domestic Cat & Domestic Dog validation
-# Domestic Cats: 281 (tabby), 282 (tiger_cat), 283 (Persian_cat), 284 (Siamese_cat), 285 (Egyptian_cat)
 IMAGENET_CAT_INDICES = set(range(281, 286))
-# Domestic Dogs: 151 (Chihuahua) through 268 (Mexican_hairless) — all 118 domestic dog breeds
 IMAGENET_DOG_INDICES = set(range(151, 269))
-# Wild carnivores/canines/felids (wolves, foxes, coyotes, hyenas, cougars, lynxes, lions, tigers, bears)
 IMAGENET_WILD_CARNIVORE_INDICES = set(range(269, 281)) | set(range(286, 300))
 
 MIN_IMAGE_DIMENSION = 32
@@ -48,7 +81,7 @@ MIN_FALLBACK_PET_PROB = 0.30
 
 
 # -------------------------------------------------------------------------
-# 2. Dynamic Keras Model Loader & Pre-Inference OOD Gatekeeper
+# 2. Model Loaders & Pre-Inference OOD Gatekeeper
 # -------------------------------------------------------------------------
 @st.cache_resource
 def load_keras_model_from_path(model_path_str: str) -> tf.keras.Model:
@@ -75,19 +108,16 @@ def find_repo_model() -> Path | None:
 
 def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
     """
-    Validates whether an uploaded PIL image is a genuine Cat or Dog photo.
-    Rejects:
-    1. Tiny images (< 32x32 px) or blank/solid-color images (pixel std < 5.0)
-    2. Other animals (lions, tigers, wolves, cows, birds, horses, etc.)
-    3. Humans, vehicles, screenshots, or arbitrary everyday objects
+    Validates whether an uploaded PIL image is a genuine domestic Cat or Dog photo.
+    Rejects low-resolution/blank files, wild animals, humans, vehicles, and objects.
     """
     width, height = pil_img.size
     if width < MIN_IMAGE_DIMENSION or height < MIN_IMAGE_DIMENSION:
         return {
             "is_valid": False,
             "reason": (
-                f"Image resolution ({width}×{height} px) is too small. "
-                f"Minimum required size is {MIN_IMAGE_DIMENSION}×{MIN_IMAGE_DIMENSION} px."
+                f"Image resolution ({width}×{height} px) is below the minimum "
+                f"required size ({MIN_IMAGE_DIMENSION}×{MIN_IMAGE_DIMENSION} px)."
             ),
             "detected_label": "Low-Resolution Image",
             "detected_conf": 0.0,
@@ -102,17 +132,16 @@ def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
         return {
             "is_valid": False,
             "reason": (
-                "Blank, solid-color, or nearly uniform image detected. "
+                "Blank or uniform solid-color image detected. "
                 "Please upload a clear photo of a Cat or Dog."
             ),
-            "detected_label": "Blank / Low-Variance Image",
+            "detected_label": "Blank Image",
             "detected_conf": 0.0,
             "cat_group_prob": 0.0,
             "dog_group_prob": 0.0,
             "pet_total_prob": 0.0,
         }
 
-    # Run ImageNet-1000 OOD gatekeeper check
     gatekeeper = load_ood_gatekeeper_model()
     img_224 = img_rgb.resize((224, 224))
     arr_224 = np.expand_dims(np.array(img_224, dtype="float32"), axis=0)
@@ -136,13 +165,12 @@ def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
         top1_idx in IMAGENET_CAT_INDICES or top1_idx in IMAGENET_DOG_INDICES
     )
 
-    # Reject if top-1 is a wild carnivore (e.g. lion, tiger, wolf, fox, bear)
     if not is_top1_cat_or_dog and wild_group_prob > pet_total_prob:
         return {
             "is_valid": False,
             "reason": (
-                f"Other animal detected (**{top1_label}**, {top1_conf * 100:.1f}% confidence). "
-                "This classifier strictly accepts domestic **Cat** and **Dog** images only."
+                f"Detected **{top1_label}** ({top1_conf * 100:.1f}% confidence). "
+                "Only domestic **Cat** and **Dog** images are supported."
             ),
             "detected_label": top1_label,
             "detected_conf": top1_conf,
@@ -151,8 +179,6 @@ def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
             "pet_total_prob": pet_total_prob,
         }
 
-    # Accept only if top-1 is a domestic cat/dog (with sufficient probability mass)
-    # or combined domestic cat+dog probability mass is strong (>= 30%)
     is_valid_pet = (
         is_top1_cat_or_dog and pet_total_prob >= MIN_PET_GROUP_PROB
     ) or (pet_total_prob >= MIN_FALLBACK_PET_PROB)
@@ -161,9 +187,9 @@ def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
         return {
             "is_valid": False,
             "reason": (
-                f"Non-Cat/Dog image detected (appears to be **{top1_label}**, "
-                f"{top1_conf * 100:.1f}% confidence; Cat/Dog score: {pet_total_prob * 100:.1f}%). "
-                "Please upload a valid **Cat** or **Dog** photo only."
+                f"Detected **{top1_label}** ({top1_conf * 100:.1f}% confidence; "
+                f"Cat/Dog match: {pet_total_prob * 100:.1f}%). "
+                "Please upload a valid **Cat** or **Dog** image."
             ),
             "detected_label": top1_label,
             "detected_conf": top1_conf,
@@ -184,16 +210,10 @@ def validate_cat_or_dog_image(pil_img: Image.Image) -> dict:
 
 
 # -------------------------------------------------------------------------
-# 3. Real-Time Forward Pass & Intermediate Conv2D Feature Map Extraction
+# 3. Real-Time CNN Forward Pass & Feature Map Extraction
 # -------------------------------------------------------------------------
 def run_real_cnn_inference(model: tf.keras.Model, pil_img: Image.Image) -> dict:
-    """
-    Runs a live forward pass through the loaded Keras model and computes:
-    - Exact input tensor shape from model.input_shape
-    - Raw sigmoid output activation P(y=1 | x)
-    - Cat vs. Dog probabilities and predicted class
-    - Real inference latency in milliseconds
-    """
+    """Runs a live forward pass through the loaded Keras model."""
     input_shape = model.input_shape
     target_h = input_shape[1] if input_shape[1] is not None else 160
     target_w = input_shape[2] if input_shape[2] is not None else 160
@@ -205,7 +225,6 @@ def run_real_cnn_inference(model: tf.keras.Model, pil_img: Image.Image) -> dict:
     raw_output = model(input_tensor, training=False).numpy()
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Binary sigmoid output P(Dog) in [0, 1]
     sigmoid_prob = float(raw_output.flatten()[0])
     dog_prob = sigmoid_prob
     cat_prob = 1.0 - sigmoid_prob
@@ -230,10 +249,7 @@ def run_real_cnn_inference(model: tf.keras.Model, pil_img: Image.Image) -> dict:
 
 
 def plot_live_conv_feature_maps(model: tf.keras.Model, input_tensor: np.ndarray):
-    """
-    Extracts and plots real-time intermediate Conv2D feature maps generated by
-    the uploaded image as it flows through the CNN layers.
-    """
+    """Extracts and plots intermediate Conv2D feature maps for the input image."""
     conv_layers = [
         layer for layer in model.layers if isinstance(layer, tf.keras.layers.Conv2D)
     ]
@@ -251,7 +267,7 @@ def plot_live_conv_feature_maps(model: tf.keras.Model, input_tensor: np.ndarray)
     fig, axes = plt.subplots(
         num_blocks,
         channels_to_show,
-        figsize=(11, 2.3 * num_blocks),
+        figsize=(11, 2.2 * num_blocks),
         dpi=130,
     )
     if num_blocks == 1:
@@ -265,9 +281,9 @@ def plot_live_conv_feature_maps(model: tf.keras.Model, input_tensor: np.ndarray)
             ax = axes[block_idx, ch_idx]
             ax.imshow(fmap_np[:, :, ch_idx], cmap="viridis")
             ax.set_title(
-                f"{layer_name} ({h_dim}×{w_dim}×{c_dim}) | Filter #{ch_idx + 1}",
-                fontsize=8.5,
-                fontweight="bold",
+                f"{layer_name} ({h_dim}×{w_dim}×{c_dim}) · Filter {ch_idx + 1}",
+                fontsize=8,
+                fontweight="medium",
             )
             ax.axis("off")
 
@@ -288,28 +304,27 @@ def get_dynamic_layer_table(model: tf.keras.Model) -> list[dict]:
                 "Layer #": idx,
                 "Layer Name": layer.name,
                 "Layer Type": layer.__class__.__name__,
-                "Output Tensor Shape": out_shape,
-                "Trainable Params": f"{layer.count_params():,}",
+                "Output Shape": out_shape,
+                "Parameters": f"{layer.count_params():,}",
             }
         )
     return rows
 
 
 # -------------------------------------------------------------------------
-# 4. Sidebar: Model Loading & Live Dynamic Model Inspector
+# 4. Sidebar: Clean Project Metadata & Model Specs
 # -------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("## Invertis University Bareilly")
-    st.caption("**CSED | Project ID: DL-003 | Group: BTech_DL_041**")
-
+    st.markdown("### Invertis University Bareilly")
+    st.caption("Department of CSED · Project ID: **DL-003** · Group: **BTech_DL_041**")
     st.divider()
-    st.subheader(" Upload your Trained `.keras` Model if you have if not try our")
 
     repo_model_path = find_repo_model()
-    uploaded_model_file = st.file_uploader(
-        "Or upload `cat_dog_classifier.keras` manually:",
-        type=["keras", "h5"],
-    )
+    with st.expander("Switch / Upload `.keras` Model", expanded=False):
+        uploaded_model_file = st.file_uploader(
+            "Select a `.keras` or `.h5` file:",
+            type=["keras", "h5"],
+        )
 
     active_model = None
     active_model_source = None
@@ -320,16 +335,16 @@ with st.sidebar:
             tmp_path = tmp.name
         try:
             active_model = load_keras_model_from_path(tmp_path)
-            active_model_source = f"Uploaded Model (`{uploaded_model_file.name}`)"
+            active_model_source = f"Custom ({uploaded_model_file.name})"
         except Exception as exc:
-            st.error(f"Failed to load uploaded `.keras` model: {exc}")
+            st.error(f"Could not load uploaded model: {exc}")
     elif repo_model_path is not None:
         try:
             active_model = load_keras_model_from_path(str(repo_model_path))
             file_mb = repo_model_path.stat().st_size / (1024 * 1024)
-            active_model_source = f"Trained CNN (`{repo_model_path.name}`, {file_mb:.2f} MB)"
+            active_model_source = f"{repo_model_path.name} ({file_mb:.1f} MB)"
         except Exception as exc:
-            st.error(f"Failed to load repository `.keras` model: {exc}")
+            st.error(f"Could not load repository model: {exc}")
 
     if active_model is not None:
         total_params = active_model.count_params()
@@ -338,39 +353,40 @@ with st.sidebar:
         )
         non_trainable_params = total_params - trainable_params
 
-        st.success(f"Active: {active_model_source}")
-        st.markdown("### 📐 Live Model Specs (Read from `.keras`)")
-        st.metric("Architecture Name", active_model.name)
-        st.metric("Total Parameters", f"{total_params:,}")
-        st.metric("Trainable Parameters", f"{trainable_params:,}")
-        st.metric("Non-Trainable Parameters", f"{non_trainable_params:,}")
-        st.metric("Total Layers", f"{len(active_model.layers)}")
+        st.markdown("#### Active Model Summary")
+        st.caption(f"**Source:** `{active_model_source}`")
+        st.caption(f"**Architecture:** `{active_model.name}`")
+
+        s1, s2 = st.columns(2)
+        s1.metric("Total Params", f"{total_params:,}")
+        s2.metric("Layers", f"{len(active_model.layers)}")
+
+        s3, s4 = st.columns(2)
+        s3.metric("Trainable", f"{trainable_params:,}")
+        s4.metric("Non-Trainable", f"{non_trainable_params:,}")
     else:
-        st.error("Valid `cat_dog_classifier.keras` not found.")
+        st.error("Model file `cat_dog_classifier.keras` not found.")
 
 
 # -------------------------------------------------------------------------
-# 5. Main Interface
+# 5. Main Header & Two-Column Workspace
 # -------------------------------------------------------------------------
-st.title("Cat and Dog Image Classification")
 st.markdown(
-    "**Real-Time Deep Learning Inference:** Every prediction, sigmoid probability, "
-    "parameter count, and convolutional feature map below is computed live at runtime "
-    "from our trained `cat_dog_classifier.keras` neural network."
+    '<div class="project-meta">DL-003 · Computer Vision · Binary Image Classification</div>'
+    '<div class="main-title">Cat and Dog Image Classification</div>'
+    '<div class="sub-caption">'
+    'Real-time convolutional neural network inference with pre-inference validation '
+    'to ensure only valid domestic Cat and Dog images are classified.'
+    '</div>',
+    unsafe_allow_html=True,
 )
 
 if active_model is None:
     st.error(
-        "### ⚠️ Valid `cat_dog_classifier.keras` File Not Loaded\n"
-        "Please upload Google Colab model `cat_dog_classifier.keras` in repo "
-        "or here."
+        "**Model Not Loaded:** Please place `cat_dog_classifier.keras` in the repository "
+        "root or upload it from the sidebar."
     )
     st.stop()
-
-st.info(
-    f"**Active Neural Network Engine:** {active_model_source} — "
-    f"`{active_model.name}` (`{active_model.count_params():,}` parameters)"
-)
 
 col_left, col_right = st.columns([1, 1], gap="large")
 pil_img = None
@@ -378,87 +394,110 @@ validation_result = None
 result = None
 
 with col_left:
-    st.subheader("1️⃣ Upload Unseen Test Image")
-    uploaded_img_file = st.file_uploader(
-        "Upload any Cat or Dog photo (JPG, PNG, WEBP):",
-        type=["jpg", "jpeg", "png", "webp"],
-    )
-    if uploaded_img_file is not None:
-        try:
-            uploaded_img_file.seek(0)
-            with Image.open(uploaded_img_file) as probe_img:
-                probe_img.verify()
-            uploaded_img_file.seek(0)
-            pil_img = Image.open(uploaded_img_file)
-            pil_img.load()
-            st.image(
-                pil_img,
-                caption=f"Original Image ({pil_img.size[0]}×{pil_img.size[1]} px)",
-                use_container_width=True,
-            )
-        except (UnidentifiedImageError, OSError, ValueError) as img_err:
-            st.error(
-                f"### ❌ Invalid or Corrupted Image File\n"
-                f"Could not decode `{uploaded_img_file.name}` ({img_err}). "
-                "Please upload a valid JPG, PNG, or WEBP image."
-            )
-            pil_img = None
+    with st.container(border=True):
+        st.markdown("#### 1. Input Image")
+        uploaded_img_file = st.file_uploader(
+            "Upload a Cat or Dog photo (JPG, PNG, WEBP)",
+            type=["jpg", "jpeg", "png", "webp"],
+        )
+
+        if uploaded_img_file is not None:
+            try:
+                uploaded_img_file.seek(0)
+                with Image.open(uploaded_img_file) as probe_img:
+                    probe_img.verify()
+                uploaded_img_file.seek(0)
+                pil_img = Image.open(uploaded_img_file)
+                pil_img.load()
+                st.image(
+                    pil_img,
+                    caption=f"{uploaded_img_file.name} · {pil_img.size[0]}×{pil_img.size[1]} px",
+                    use_container_width=True,
+                )
+            except (UnidentifiedImageError, OSError, ValueError) as img_err:
+                st.error(
+                    f"**Invalid Image File:** Unable to read `{uploaded_img_file.name}` ({img_err}). "
+                    "Please upload a valid JPG, PNG, or WEBP image."
+                )
+                pil_img = None
+        else:
+            st.caption("Supported formats: JPG, JPEG, PNG, WEBP (minimum 32×32 px).")
 
 with col_right:
-    st.subheader("2️⃣ Live Neural Network Output")
-    if pil_img is not None:
-        validation_result = validate_cat_or_dog_image(pil_img)
+    with st.container(border=True):
+        st.markdown("#### 2. Classification Result")
 
-        if not validation_result["is_valid"]:
-            st.error(
-                "### ❌ Invalid Image: Not a Cat or Dog!\n"
-                f"{validation_result['reason']}"
-            )
-            st.warning(
-                "🔒 **Prediction Blocked:** Our CNN classifier only predicts on valid "
-                "**Cat 🐱** or **Dog 🐶** images. Images of other animals, people, "
-                "vehicles, or objects are automatically rejected."
-            )
+        if pil_img is not None:
+            validation_result = validate_cat_or_dog_image(pil_img)
+
+            if not validation_result["is_valid"]:
+                st.error(
+                    "**Invalid Image — Not a Cat or Dog**\n\n"
+                    f"{validation_result['reason']}"
+                )
+                st.caption(
+                    "Prediction stopped: this model only classifies domestic Cat and Dog photos. "
+                    "Images of other animals, people, vehicles, or objects are rejected."
+                )
+            else:
+                result = run_real_cnn_inference(active_model, pil_img)
+
+                st.success(f"**Predicted Class:** {result['pred_label']}")
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Confidence", f"{result['confidence'] * 100:.2f}%")
+                m2.metric("Sigmoid σ(z)", f"{result['raw_sigmoid']:.4f}")
+                m3.metric("Latency", f"{result['latency_ms']:.1f} ms")
+
+                st.divider()
+                st.markdown("**Class Probability Distribution**")
+
+                c_label, c_val = st.columns([3, 1])
+                c_label.caption("Cat (Class 0) · 1 − σ(z)")
+                c_val.caption(f"**{result['cat_prob'] * 100:.2f}%**")
+                st.progress(int(round(result["cat_prob"] * 100)))
+
+                d_label, d_val = st.columns([3, 1])
+                d_label.caption("Dog (Class 1) · σ(z)")
+                d_val.caption(f"**{result['dog_prob'] * 100:.2f}%**")
+                st.progress(int(round(result["dog_prob"] * 100)))
+
+                st.caption(
+                    f"Input Tensor: `{result['tensor_shape']}` · "
+                    f"Pixel Range: `[{result['tensor_min']:.0f}, {result['tensor_max']:.0f}]`"
+                )
         else:
-            result = run_real_cnn_inference(active_model, pil_img)
+            st.info("Upload a Cat or Dog photo on the left to view live CNN predictions.")
 
-            st.success(f"### Predicted Class: **{result['pred_label']}**")
 
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Confidence", f"{result['confidence'] * 100:.2f}%")
-            m2.metric("Raw Sigmoid σ(z)", f"{result['raw_sigmoid']:.6f}")
-            m3.metric("Inference Time", f"{result['latency_ms']:.1f} ms")
+# -------------------------------------------------------------------------
+# 6. Clean Diagnostic Tabs (Feature Maps & Architecture Table)
+# -------------------------------------------------------------------------
+st.write("")
+tab_fmaps, tab_arch = st.tabs(
+    ["Convolutional Feature Maps", "Model Layer Architecture"]
+)
 
-            st.markdown("#### Real-Time Class Probabilities")
-            st.write(f"🐱 **Cat (`Class 0`) Probability `1 - σ(z)`:** `{result['cat_prob'] * 100:.2f}%`")
-            st.progress(int(round(result["cat_prob"] * 100)))
-
-            st.write(f"🐶 **Dog (`Class 1`) Probability `σ(z)`:** `{result['dog_prob'] * 100:.2f}%`")
-            st.progress(int(round(result["dog_prob"] * 100)))
-
-            st.caption(
-                f"**Live Tensor Specs:** Shape `{result['tensor_shape']}` | "
-                f"Raw Pixel Range `[{result['tensor_min']:.1f}, {result['tensor_max']:.1f}]` "
-                f"(normalized inside model via `Rescaling(1./255)`)"
-            )
+with tab_fmaps:
+    if result is not None:
+        st.caption(
+            "Intermediate activation maps extracted live from the first four `Conv2D` layers."
+        )
+        fmap_fig = plot_live_conv_feature_maps(active_model, result["input_tensor"])
+        if fmap_fig is not None:
+            st.pyplot(fmap_fig)
+            plt.close(fmap_fig)
     else:
-        st.info("👉 Upload a Cat or Dog image on the left to run a live forward pass through the CNN.")
+        st.caption(
+            "Upload a valid Cat or Dog image above to inspect live `Conv2D` feature maps."
+        )
 
-# -------------------------------------------------------------------------
-# 6. Live Convolutional Feature Maps & Dynamic Layer Architecture
-# -------------------------------------------------------------------------
-if result is not None:
-    st.divider()
-    st.subheader("🔬 Live Convolutional Feature Maps (What the CNN Sees Inside Each Block)")
+with tab_arch:
     st.caption(
-        "These heatmaps are generated dynamically at runtime by passing your uploaded image "
-        "through each `Conv2D` layer of `cat_dog_classifier.keras`."
+        f"Architecture summary for `{active_model.name}` ({active_model.count_params():,} total parameters)."
     )
-    fmap_fig = plot_live_conv_feature_maps(active_model, result["input_tensor"])
-    if fmap_fig is not None:
-        st.pyplot(fmap_fig)
-        plt.close(fmap_fig)
-
-st.divider()
-with st.expander("🧱 Inspect Live Model Layer Architecture (Read Directly from `model.layers`)"):
-    st.table(get_dynamic_layer_table(active_model))
+    st.dataframe(
+        get_dynamic_layer_table(active_model),
+        use_container_width=True,
+        hide_index=True,
+    )
