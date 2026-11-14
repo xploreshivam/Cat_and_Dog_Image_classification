@@ -2,7 +2,7 @@
 
 **Live Web Application:** [https://catdogimageclassificationdeeplearning.streamlit.app/](https://catdogimageclassificationdeeplearning.streamlit.app/)  
 **GitHub Repository:** [https://github.com/xploreshivam/Cat_and_Dog_Image_classification](https://github.com/xploreshivam/Cat_and_Dog_Image_classification)  
-**Google Colab Notebook:** [https://colab.research.google.com/drive/11H\_BtjAKSg-czepEOvtQFP4BNg2Qnwvu](https://www.google.com/search?q=https://colab.research.google.com/drive/11H_BtjAKSg-czepEOvtQFP4BNg2Qnwvu)  
+**Google Colab Notebook:** [https://colab.research.google.com/drive/11H\_BtjAKSg-czepEOvtQFP4BNg2Qnwvu](https://drive.google.com/drive/folders/1x9azbiwa8r7BjE_FY5e8xcAZTNF32-I4?usp=drive_link)  
 **Tech Stack:** Python, TensorFlow (`tensorflow-cpu`), Keras, Streamlit, Pillow (`PIL`), NumPy, Scikit-Learn, Matplotlib
 
 ## Project Objective
