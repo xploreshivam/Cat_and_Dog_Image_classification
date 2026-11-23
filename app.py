@@ -213,12 +213,15 @@ st.markdown(
             line-height: 1.15;
         }
 
-        .hero-subtitle {
+       .hero-subtitle,
+        [data-testid="stMarkdownContainer"] p.hero-subtitle {
             font-size: 0.875rem;
             color: #D1D5DB;
             line-height: 1.6;
             max-width: 42rem;
-            margin: 0.75rem auto 0.25rem auto;
+            width: 100%;
+            text-align: center !important;
+            margin: 0.75rem auto 0.25rem auto !important;
         }
 
         /* Section Headings with Icon Badges */
